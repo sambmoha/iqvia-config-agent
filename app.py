@@ -279,7 +279,7 @@ footer { display: none !important; }
 
 RULE_HEADERS = ["Rule ID", "Field", "Operator", "Value", "Severity", "Message"]
 
-with gr.Blocks(title="IQVIA Configuration Agent") as demo:
+with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_hue="blue"), css=CSS) as demo:
 
     # ── Shared state ─────────────────────────────────────────────────────────
     config_state = gr.State({})
@@ -482,7 +482,4 @@ with gr.Blocks(title="IQVIA Configuration Agent") as demo:
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    demo.launch(
-        theme=gr.themes.Soft(primary_hue="blue"),
-        css=CSS,
-    )
+    demo.launch()
