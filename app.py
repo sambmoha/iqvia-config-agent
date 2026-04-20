@@ -63,10 +63,17 @@ PRESET_SCENARIOS = {
         "Investigator and data manager e-signatures must be captured. Incomplete records block lock.",
 }
 
-DOMAINS       = ["clinical", "safety", "commercial", "compliance", "regulatory", "quality"]
-PRIORITIES    = ["high", "medium", "low"]
+DOMAINS        = ["clinical", "safety", "commercial", "compliance", "regulatory", "quality"]
+PRIORITIES     = ["high", "medium", "low"]
 APPROVER_ROLES = ["senior_reviewer", "medical_monitor", "qa_manager", "site_pi", "data_manager"]
-REVIEWER_ID   = "human_reviewer"
+REVIEWER_ID    = "human_reviewer"
+
+# Available LLM models — add more here as needed
+LLM_MODELS = [
+    "Qwen/Qwen3-8B",
+    "Qwen/Qwen3-4B",
+    "Qwen/Qwen3-30B-A3B",
+]
 
 # ---------------------------------------------------------------------------
 # Helpers — data conversion
@@ -137,6 +144,26 @@ def fill_preset(scenario_name: str) -> str:
     return PRESET_SCENARIOS.get(scenario_name, "")
 
 
+def _token_usage_md(api_meta: dict) -> str:
+    """Format token usage as a small markdown summary panel."""
+    status = api_meta.get("status", "—")
+    model  = api_meta.get("model", "—")
+    pt     = api_meta.get("prompt_tokens",     "—")
+    ct     = api_meta.get("completion_tokens", "—")
+    tt     = api_meta.get("total_tokens",      "—")
+    called = api_meta.get("called_at",         "—")
+
+    return (
+        f"| Field | Value |\n|---|---|\n"
+        f"| **Model** | `{model}` |\n"
+        f"| **Status** | {status} |\n"
+        f"| **Prompt tokens** | {pt} |\n"
+        f"| **Completion tokens** | {ct} |\n"
+        f"| **Total tokens** | {tt} |\n"
+        f"| **Called at** | {called} |\n"
+    )
+
+
 def on_generate(
     requirement: str,
     domain: str,
@@ -145,24 +172,25 @@ def on_generate(
     approver_role: str,
     notification: bool,
     strict_mode: bool,
+    model_choice: str,
 ):
     """
     Main pipeline trigger:
-      1. Call LLM (or fallback) to generate config
+      1. Call selected LLM (or fallback) to generate config
       2. Run validation
-      3. Return all display artefacts
+      3. Return all display artefacts including token usage
     """
     if not requirement.strip():
         empty = {}
         return (
-            empty, "", [], {},          # config views
-            {},                          # validation
-            {},                          # api meta
+            empty, "", [], {},
+            {},
             "⚠️ Please enter a requirement.",
+            "—",
             PIPELINE_IDLE,
             gr.update(interactive=False),
             gr.update(interactive=False),
-            empty,                       # state
+            empty,
         )
 
     approval_bool = approval_required == "Yes"
@@ -172,22 +200,24 @@ def on_generate(
         domain=domain,
         priority=priority,
         approval_required=approval_bool,
+        model_name=model_choice,
     )
 
-    # Inject UI-level parameters into the config parameters block
+    # Inject UI-level parameters into config
     config.setdefault("parameters", {})
     config["parameters"]["notification_enabled"] = notification
     config["parameters"]["strict_mode"] = strict_mode
     config["parameters"]["approver_role_override"] = approver_role
 
-    yaml_str   = _to_yaml(config)
-    rules_rows = _rules_to_table(config)
+    yaml_str      = _to_yaml(config)
+    rules_rows    = _rules_to_table(config)
+    token_usage   = _token_usage_md(api_meta)
 
     valid = validation["status"] == "valid"
     icon  = "✅" if valid else "⚠️"
     msg   = (
-        f"{icon} **{config.get('config_id')}** generated via "
-        f"**{api_meta.get('status', 'unknown')}**. "
+        f"{icon} **{config.get('config_id')}** · Model: `{api_meta.get('model')}` · "
+        f"Status: **{api_meta.get('status')}** · "
         f"Validation: **{validation['status'].upper()}** "
         f"(score {validation['score']}/100 · "
         f"{len(validation['errors'])} error(s) · "
@@ -200,8 +230,8 @@ def on_generate(
         rules_rows,                          # Rules table tab
         api_meta,                            # API info tab
         validation,                          # Validation panel
-        api_meta,                            # API meta display
         msg,                                 # Status message
+        token_usage,                         # Token usage panel
         _pipeline_md(gen=True, val=True),    # Pipeline progress
         gr.update(interactive=valid),        # Approve button
         gr.update(interactive=True),         # Reject button
@@ -313,8 +343,21 @@ with gr.Blocks(title="IQVIA Configuration Agent") as demo:
             notification_cb = gr.Checkbox(value=True,  label="Enable Notifications")
             strict_cb       = gr.Checkbox(value=False, label="Strict Mode (errors block deploy)")
 
+    # -- LLM model selector
+    with gr.Row():
+        model_dd = gr.Dropdown(
+            choices=LLM_MODELS,
+            value=LLM_MODELS[0],
+            label="🤖 LLM Model",
+            info="Select which Qwen model to use for config generation",
+            scale=2,
+        )
+
     generate_btn = gr.Button("⚙️ Generate Configuration", variant="primary", size="lg")
     gen_status   = gr.Markdown("")
+
+    # -- Token usage panel (visible after generation)
+    token_usage_md = gr.Markdown("", label="Token Usage")
 
     gr.Markdown("---")
 
@@ -402,12 +445,13 @@ with gr.Blocks(title="IQVIA Configuration Agent") as demo:
             domain_dd, priority_radio,
             approval_yn, approver_dd,
             notification_cb, strict_cb,
+            model_dd,
         ],
         outputs=[
             config_json, config_yaml, rules_table, api_info_json,   # config views
             validation_json,                                          # validation
-            api_info_json,                                            # api meta (reused)
             gen_status,                                               # status message
+            token_usage_md,                                           # token usage panel
             pipeline_md,                                              # pipeline bar
             approve_btn, reject_btn,                                  # button states
             config_state,                                             # shared state
