@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+.venv/
+venv/
+
+# Secrets
+.env
+*.env
+
+# OS
+.DS_Store
+
+# Data (reset on deploy)
+data/logs.json
+data/configs.json
