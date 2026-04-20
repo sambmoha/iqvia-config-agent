@@ -1,3 +1,14 @@
+---
+title: IQVIA Configuration Agent
+emoji: 🏥
+colorFrom: blue
+colorTo: indigo
+sdk: gradio
+sdk_version: "4.44.0"
+app_file: app.py
+pinned: false
+---
+
 # IQVIA Configuration Agent
 
 > **End-to-End AI-Powered Configuration Lifecycle for Clinical & Enterprise Platforms**
