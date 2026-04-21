@@ -68,7 +68,6 @@ PRIORITIES     = ["high", "medium", "low"]
 APPROVER_ROLES = ["senior_reviewer", "medical_monitor", "qa_manager", "site_pi", "data_manager"]
 REVIEWER_ID    = "human_reviewer"
 
-# Available LLM models — add more here as needed
 LLM_MODELS = [
     "Qwen/Qwen3-8B",
     "Qwen/Qwen3-4B",
@@ -79,15 +78,20 @@ LLM_MODELS = [
 # Helpers — data conversion
 # ---------------------------------------------------------------------------
 def _to_yaml(config: dict) -> str:
-    """Convert config dict to YAML string for display."""
     try:
         return yaml.dump(config, default_flow_style=False, sort_keys=False, allow_unicode=True)
     except Exception as exc:
         return f"# YAML conversion error: {exc}\n{json.dumps(config, indent=2)}"
 
 
+def _to_json_str(obj) -> str:
+    try:
+        return json.dumps(obj, indent=2, default=str)
+    except Exception as exc:
+        return f"// JSON serialization error: {exc}"
+
+
 def _rules_to_table(config: dict) -> list[list]:
-    """Extract validation_rules into a flat list-of-lists for gr.Dataframe."""
     rules = config.get("validation_rules", [])
     if not rules:
         return [["—", "—", "—", "—", "—", "—"]]
@@ -105,7 +109,6 @@ def _rules_to_table(config: dict) -> list[list]:
 
 
 def _env_vars_table() -> list[list]:
-    """Return masked environment variables for display."""
     token = os.environ.get("HF_TOKEN", "")
     masked = ("●" * 8 + token[-4:]) if len(token) > 4 else "⚠ Not set"
     return [
@@ -140,19 +143,16 @@ PIPELINE_IDLE = _pipeline_md()
 # Event handlers
 # ---------------------------------------------------------------------------
 def fill_preset(scenario_name: str) -> str:
-    """Load a preset scenario text into the requirement textbox."""
     return PRESET_SCENARIOS.get(scenario_name, "")
 
 
 def _token_usage_md(api_meta: dict) -> str:
-    """Format token usage as a small markdown summary panel."""
     status = api_meta.get("status", "—")
     model  = api_meta.get("model", "—")
     pt     = api_meta.get("prompt_tokens",     "—")
     ct     = api_meta.get("completion_tokens", "—")
     tt     = api_meta.get("total_tokens",      "—")
     called = api_meta.get("called_at",         "—")
-
     return (
         f"| Field | Value |\n|---|---|\n"
         f"| **Model** | `{model}` |\n"
@@ -174,22 +174,15 @@ def on_generate(
     strict_mode: bool,
     model_choice: str,
 ):
-    """
-    Main pipeline trigger:
-      1. Call selected LLM (or fallback) to generate config
-      2. Run validation
-      3. Return all display artefacts including token usage
-    """
     if not requirement.strip():
-        empty = {}
         return (
-            empty, "", [], {},
-            {},
+            "", "", [], "",
+            "",
             "⚠️ Please enter a requirement.",
             "—",
             PIPELINE_IDLE,
-            empty,
-            empty,
+            {},
+            {},
         )
 
     approval_bool = approval_required == "Yes"
@@ -202,15 +195,14 @@ def on_generate(
         model_name=model_choice,
     )
 
-    # Inject UI-level parameters into config
     config.setdefault("parameters", {})
     config["parameters"]["notification_enabled"] = notification
     config["parameters"]["strict_mode"] = strict_mode
     config["parameters"]["approver_role_override"] = approver_role
 
-    yaml_str      = _to_yaml(config)
-    rules_rows    = _rules_to_table(config)
-    token_usage   = _token_usage_md(api_meta)
+    yaml_str    = _to_yaml(config)
+    rules_rows  = _rules_to_table(config)
+    token_usage = _token_usage_md(api_meta)
 
     valid = validation["status"] == "valid"
     icon  = "✅" if valid else "⚠️"
@@ -224,54 +216,58 @@ def on_generate(
     )
 
     return (
-        config,                              # JSON tab
-        yaml_str,                            # YAML tab
-        rules_rows,                          # Rules table tab
-        api_meta,                            # API info tab
-        validation,                          # Validation panel
-        msg,                                 # Status message
-        token_usage,                         # Token usage panel
-        _pipeline_md(gen=True, val=True),    # Pipeline progress
-        config,                              # config_state
-        validation,                          # validation_state
+        _to_json_str(config),       # JSON tab (string)
+        yaml_str,                   # YAML tab
+        rules_rows,                 # Rules table tab
+        _to_json_str(api_meta),     # API info tab (string)
+        _to_json_str(validation),   # Validation panel (string)
+        msg,                        # Status message
+        token_usage,                # Token usage panel
+        _pipeline_md(gen=True, val=True),  # Pipeline progress
+        config,                     # config_state
+        validation,                 # validation_state
     )
 
 
 def on_approve(config_state: dict, notes: str):
     if not config_state:
-        return {}, "⚠️ No config loaded.", _pipeline_md()
+        return "", "⚠️ No config loaded.", _pipeline_md()
     result = approve(config_state, REVIEWER_ID, notes)
-    return result, f"✅ Approved: **{result['config_id']}**", _pipeline_md(gen=True, val=True, appr=True)
+    return _to_json_str(result), f"✅ Approved: **{result['config_id']}**", _pipeline_md(gen=True, val=True, appr=True)
 
 
 def on_reject(config_state: dict, notes: str):
     if not config_state:
-        return {}, "⚠️ No config loaded.", _pipeline_md()
+        return "", "⚠️ No config loaded.", _pipeline_md()
     result = reject(config_state, REVIEWER_ID, notes)
-    return result, f"🔴 Rejected. Reason: {notes or 'None provided'}", _pipeline_md(gen=True, val=True, appr=False)
+    return _to_json_str(result), f"🔴 Rejected. Reason: {notes or 'None provided'}", _pipeline_md(gen=True, val=True, appr=False)
 
 
 def on_deploy(config_state: dict, validation_state: dict, environment: str, notes: str):
     if not config_state:
-        return {}, "⚠️ Generate and approve a config first."
+        return "", "⚠️ Generate and approve a config first."
 
     strict = config_state.get("parameters", {}).get("strict_mode", False)
     errors = validation_state.get("errors", [])
     if strict and errors:
-        blocked = {"blocked": True, "reason": "Strict Mode is ON — deployment blocked due to validation errors", "errors": errors}
-        return blocked, f"🚫 **Deployment blocked** — Strict Mode is enabled and {len(errors)} validation error(s) must be resolved first."
+        blocked = {
+            "blocked": True,
+            "reason": "Strict Mode is ON — deployment blocked due to validation errors",
+            "errors": errors,
+        }
+        return _to_json_str(blocked), f"🚫 **Deployment blocked** — Strict Mode is enabled and {len(errors)} validation error(s) must be resolved first."
 
     result = deploy(config_state, environment, notes)
     icon = "✅" if result["success"] else "❌"
-    return result, f"{icon} Deployed **{result.get('config_id')}** → **{result.get('target_environment')}** | Ref: {result.get('audit_ref')}"
+    return _to_json_str(result), f"{icon} Deployed **{result.get('config_id')}** → **{result.get('target_environment')}** | Ref: {result.get('audit_ref')}"
 
 
 def on_refresh_logs():
-    return get_recent_logs(25)
+    return _to_json_str(get_recent_logs(25))
 
 
 def on_load_history():
-    return get_config_history()
+    return _to_json_str(get_config_history())
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +301,6 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
     gr.Markdown("### 📋 Step 1 — Business Requirement", elem_classes=["step-label"])
 
     with gr.Tabs():
-        # -- Tab A: Natural language input
         with gr.Tab("✏️ Natural Language"):
             requirement_input = gr.Textbox(
                 label="Enter requirement in plain English",
@@ -315,8 +310,6 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
                 ),
                 lines=4,
             )
-
-        # -- Tab B: Preset examples (10 scenarios as radio buttons)
         with gr.Tab("📂 Preset Examples"):
             gr.Markdown("Select a preset scenario — click **Load** to copy it into the input box.")
             preset_radio = gr.Radio(
@@ -326,7 +319,6 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
             )
             load_preset_btn = gr.Button("⬆️ Load into Requirement Box", size="sm")
 
-    # -- Configuration parameters (dropdowns + yes/no)
     with gr.Accordion("⚙️ Configuration Parameters", open=True):
         with gr.Row():
             domain_dd = gr.Dropdown(
@@ -342,14 +334,10 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
                 label="Approver Role"
             )
         with gr.Row():
-            approval_yn = gr.Radio(
-                choices=["Yes", "No"], value="Yes",
-                label="Approval Required?"
-            )
+            approval_yn     = gr.Radio(choices=["Yes", "No"], value="Yes", label="Approval Required?")
             notification_cb = gr.Checkbox(value=True,  label="Enable Notifications")
             strict_cb       = gr.Checkbox(value=False, label="Strict Mode (errors block deploy)")
 
-    # -- LLM model selector
     with gr.Row():
         model_dd = gr.Dropdown(
             choices=LLM_MODELS,
@@ -359,22 +347,19 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
             scale=2,
         )
 
-    generate_btn = gr.Button("⚙️ Generate Configuration", variant="primary", size="lg")
-    gen_status   = gr.Markdown("")
-
-    # -- Token usage panel (visible after generation)
+    generate_btn   = gr.Button("⚙️ Generate Configuration", variant="primary", size="lg")
+    gen_status     = gr.Markdown("")
     token_usage_md = gr.Markdown("", label="Token Usage")
 
     gr.Markdown("---")
 
     # ── STEP 2+3: Config Output + Validation ────────────────────────────────
     with gr.Row():
-        # Config display — four views
         with gr.Column(scale=3):
             gr.Markdown("### ⚙️ Step 2 — Generated Configuration", elem_classes=["step-label"])
             with gr.Tabs():
                 with gr.Tab("📄 JSON"):
-                    config_json = gr.JSON(label="Configuration (JSON)")
+                    config_json = gr.Code(label="Configuration (JSON)", language="json", lines=20)
                 with gr.Tab("📝 YAML"):
                     config_yaml = gr.Code(label="Configuration (YAML)", language="yaml", lines=20)
                 with gr.Tab("📊 Rules Table"):
@@ -386,46 +371,41 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
                         wrap=True,
                     )
                 with gr.Tab("🔌 API Response Info"):
-                    api_info_json = gr.JSON(label="LLM API Metadata")
+                    api_info_json = gr.Code(label="LLM API Metadata", language="json", lines=15)
 
-        # Validation panel
         with gr.Column(scale=2):
             gr.Markdown("### ✅ Step 3 — Validation Report", elem_classes=["step-label"])
-            validation_json = gr.JSON(label="Validation Results")
+            validation_json = gr.Code(label="Validation Results", language="json", lines=15)
 
     gr.Markdown("---")
 
     # ── STEP 4: Human Approval ────────────────────────────────────────────────
     gr.Markdown("### 👤 Step 4 — Human-in-the-Loop Approval", elem_classes=["step-label"])
-    reviewer_notes = gr.Textbox(
-        label="Reviewer Notes",
-        placeholder="Add override reason or comments here...",
-        lines=2,
-    )
+    reviewer_notes  = gr.Textbox(label="Reviewer Notes", placeholder="Add override reason or comments here...", lines=2)
     with gr.Row():
         approve_btn = gr.Button("✅ Approve", variant="primary")
         reject_btn  = gr.Button("❌ Reject",  variant="stop")
-    approval_json   = gr.JSON(label="Approval Record")
+    approval_json   = gr.Code(label="Approval Record", language="json", lines=8)
     approval_status = gr.Markdown("")
 
     gr.Markdown("---")
 
     # ── STEP 5: Deployment ────────────────────────────────────────────────────
     gr.Markdown("### 🚀 Step 5 — Deployment Pipeline (Dev → QA → Prod)", elem_classes=["step-label"])
-    env_radio = gr.Radio(choices=["dev", "qa", "prod"], value="dev", label="Target Environment")
-    deploy_btn       = gr.Button("🚀 Deploy", variant="primary")
-    deployment_json  = gr.JSON(label="Deployment Status")
-    deploy_status    = gr.Markdown("")
+    env_radio       = gr.Radio(choices=["dev", "qa", "prod"], value="dev", label="Target Environment")
+    deploy_btn      = gr.Button("🚀 Deploy", variant="primary")
+    deployment_json = gr.Code(label="Deployment Status", language="json", lines=20)
+    deploy_status   = gr.Markdown("")
 
     gr.Markdown("---")
 
     # ── STEP 6: Audit Logs + Environment ────────────────────────────────────
     with gr.Accordion("📊 Step 6 — Audit Logs & Environment", open=False):
         with gr.Tab("📋 Audit Logs"):
-            logs_json   = gr.JSON(label="Recent Actions (newest first)")
+            logs_json   = gr.Code(label="Recent Actions (newest first)", language="json", lines=20)
             refresh_btn = gr.Button("🔄 Refresh Logs")
         with gr.Tab("📁 Config History"):
-            history_json = gr.JSON(label="All Saved Configs")
+            history_json = gr.Code(label="All Saved Configs", language="json", lines=20)
             history_btn  = gr.Button("🔄 Load History")
         with gr.Tab("🔧 Environment Variables"):
             gr.Markdown("Active runtime environment variables (token is masked).")
@@ -454,13 +434,13 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
             model_dd,
         ],
         outputs=[
-            config_json, config_yaml, rules_table, api_info_json,   # config views
-            validation_json,                                          # validation
-            gen_status,                                               # status message
-            token_usage_md,                                           # token usage panel
-            pipeline_md,                                              # pipeline bar
-            config_state,                                             # config shared state
-            validation_state,                                         # validation shared state
+            config_json, config_yaml, rules_table, api_info_json,
+            validation_json,
+            gen_status,
+            token_usage_md,
+            pipeline_md,
+            config_state,
+            validation_state,
         ],
     )
 
