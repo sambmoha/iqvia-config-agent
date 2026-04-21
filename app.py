@@ -188,8 +188,6 @@ def on_generate(
             "⚠️ Please enter a requirement.",
             "—",
             PIPELINE_IDLE,
-            gr.update(interactive=False),
-            gr.update(interactive=False),
             empty,
             empty,
         )
@@ -234,8 +232,6 @@ def on_generate(
         msg,                                 # Status message
         token_usage,                         # Token usage panel
         _pipeline_md(gen=True, val=True),    # Pipeline progress
-        gr.update(interactive=valid),        # Approve button
-        gr.update(interactive=True),         # Reject button
         config,                              # config_state
         validation,                          # validation_state
     )
@@ -407,8 +403,8 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
         lines=2,
     )
     with gr.Row():
-        approve_btn = gr.Button("✅ Approve", variant="primary", interactive=False)
-        reject_btn  = gr.Button("❌ Reject",  variant="stop",    interactive=True)
+        approve_btn = gr.Button("✅ Approve", variant="primary")
+        reject_btn  = gr.Button("❌ Reject",  variant="stop")
     approval_json   = gr.JSON(label="Approval Record")
     approval_status = gr.Markdown("")
 
@@ -463,7 +459,6 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
             gen_status,                                               # status message
             token_usage_md,                                           # token usage panel
             pipeline_md,                                              # pipeline bar
-            approve_btn, reject_btn,                                  # button states
             config_state,                                             # config shared state
             validation_state,                                         # validation shared state
         ],
