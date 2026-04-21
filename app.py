@@ -191,6 +191,7 @@ def on_generate(
             gr.update(interactive=False),
             gr.update(interactive=False),
             empty,
+            empty,
         )
 
     approval_bool = approval_required == "Yes"
@@ -235,7 +236,8 @@ def on_generate(
         _pipeline_md(gen=True, val=True),    # Pipeline progress
         gr.update(interactive=valid),        # Approve button
         gr.update(interactive=True),         # Reject button
-        config,                              # State
+        config,                              # config_state
+        validation,                          # validation_state
     )
 
 
@@ -253,9 +255,16 @@ def on_reject(config_state: dict, notes: str):
     return result, f"🔴 Rejected. Reason: {notes or 'None provided'}", _pipeline_md(gen=True, val=True, appr=False)
 
 
-def on_deploy(config_state: dict, environment: str, notes: str):
+def on_deploy(config_state: dict, validation_state: dict, environment: str, notes: str):
     if not config_state:
         return {}, "⚠️ Generate and approve a config first."
+
+    strict = config_state.get("parameters", {}).get("strict_mode", False)
+    errors = validation_state.get("errors", [])
+    if strict and errors:
+        blocked = {"blocked": True, "reason": "Strict Mode is ON — deployment blocked due to validation errors", "errors": errors}
+        return blocked, f"🚫 **Deployment blocked** — Strict Mode is enabled and {len(errors)} validation error(s) must be resolved first."
+
     result = deploy(config_state, environment, notes)
     icon = "✅" if result["success"] else "❌"
     return result, f"{icon} Deployed **{result.get('config_id')}** → **{result.get('target_environment')}** | Ref: {result.get('audit_ref')}"
@@ -282,7 +291,8 @@ RULE_HEADERS = ["Rule ID", "Field", "Operator", "Value", "Severity", "Message"]
 with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_hue="blue"), css=CSS) as demo:
 
     # ── Shared state ─────────────────────────────────────────────────────────
-    config_state = gr.State({})
+    config_state     = gr.State({})
+    validation_state = gr.State({})
 
     # ── Header ───────────────────────────────────────────────────────────────
     gr.Markdown("# 🏥 IQVIA Configuration Agent")
@@ -454,7 +464,8 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
             token_usage_md,                                           # token usage panel
             pipeline_md,                                              # pipeline bar
             approve_btn, reject_btn,                                  # button states
-            config_state,                                             # shared state
+            config_state,                                             # config shared state
+            validation_state,                                         # validation shared state
         ],
     )
 
@@ -472,7 +483,7 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
 
     deploy_btn.click(
         fn=on_deploy,
-        inputs=[config_state, env_radio, reviewer_notes],
+        inputs=[config_state, validation_state, env_radio, reviewer_notes],
         outputs=[deployment_json, deploy_status],
     )
 
