@@ -359,9 +359,9 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
             gr.Markdown("### ⚙️ Step 2 — Generated Configuration", elem_classes=["step-label"])
             with gr.Tabs():
                 with gr.Tab("📄 JSON"):
-                    config_json = gr.Code(label="Configuration (JSON)", language="json", lines=20)
+                    config_json = gr.Code(value="", label="Configuration (JSON)", language="json", lines=20)
                 with gr.Tab("📝 YAML"):
-                    config_yaml = gr.Code(label="Configuration (YAML)", language="yaml", lines=20)
+                    config_yaml = gr.Code(value="", label="Configuration (YAML)", language="yaml", lines=20)
                 with gr.Tab("📊 Rules Table"):
                     rules_table = gr.Dataframe(
                         headers=RULE_HEADERS,
@@ -371,11 +371,11 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
                         wrap=True,
                     )
                 with gr.Tab("🔌 API Response Info"):
-                    api_info_json = gr.Code(label="LLM API Metadata", language="json", lines=15)
+                    api_info_json = gr.Code(value="", label="LLM API Metadata", language="json", lines=15)
 
         with gr.Column(scale=2):
             gr.Markdown("### ✅ Step 3 — Validation Report", elem_classes=["step-label"])
-            validation_json = gr.Code(label="Validation Results", language="json", lines=15)
+            validation_json = gr.Code(value="", label="Validation Results", language="json", lines=15)
 
     gr.Markdown("---")
 
@@ -385,7 +385,7 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
     with gr.Row():
         approve_btn = gr.Button("✅ Approve", variant="primary")
         reject_btn  = gr.Button("❌ Reject",  variant="stop")
-    approval_json   = gr.Code(label="Approval Record", language="json", lines=8)
+    approval_json   = gr.Code(value="", label="Approval Record", language="json", lines=8)
     approval_status = gr.Markdown("")
 
     gr.Markdown("---")
@@ -394,7 +394,7 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
     gr.Markdown("### 🚀 Step 5 — Deployment Pipeline (Dev → QA → Prod)", elem_classes=["step-label"])
     env_radio       = gr.Radio(choices=["dev", "qa", "prod"], value="dev", label="Target Environment")
     deploy_btn      = gr.Button("🚀 Deploy", variant="primary")
-    deployment_json = gr.Code(label="Deployment Status", language="json", lines=20)
+    deployment_json = gr.Code(value="", label="Deployment Status", language="json", lines=20)
     deploy_status   = gr.Markdown("")
 
     gr.Markdown("---")
@@ -402,10 +402,10 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
     # ── STEP 6: Audit Logs + Environment ────────────────────────────────────
     with gr.Accordion("📊 Step 6 — Audit Logs & Environment", open=False):
         with gr.Tab("📋 Audit Logs"):
-            logs_json   = gr.Code(label="Recent Actions (newest first)", language="json", lines=20)
+            logs_json   = gr.Code(value="", label="Recent Actions (newest first)", language="json", lines=20)
             refresh_btn = gr.Button("🔄 Refresh Logs")
         with gr.Tab("📁 Config History"):
-            history_json = gr.Code(label="All Saved Configs", language="json", lines=20)
+            history_json = gr.Code(value="", label="All Saved Configs", language="json", lines=20)
             history_btn  = gr.Button("🔄 Load History")
         with gr.Tab("🔧 Environment Variables"):
             gr.Markdown("Active runtime environment variables (token is masked).")
