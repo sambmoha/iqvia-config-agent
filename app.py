@@ -15,6 +15,19 @@ import json
 import yaml
 import gradio as gr
 
+# Load .env for local development (no-op if file absent or dotenv not installed)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    _env = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(_env):
+        for _line in open(_env):
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 from agent.flow import generate_and_validate, approve, reject, deploy
 from tools.logger import get_recent_logs, get_config_history
 
@@ -176,8 +189,8 @@ def on_generate(
 ):
     if not requirement.strip():
         return (
-            "", "", [], "",
-            "",
+            "{}", "# Ready — click Generate", [], "{}",
+            "{}",
             "⚠️ Please enter a requirement.",
             "—",
             PIPELINE_IDLE,
@@ -231,21 +244,21 @@ def on_generate(
 
 def on_approve(config_state: dict, notes: str):
     if not config_state:
-        return "", "⚠️ No config loaded.", _pipeline_md()
+        return "{}", "⚠️ No config loaded.", _pipeline_md()
     result = approve(config_state, REVIEWER_ID, notes)
     return _to_json_str(result), f"✅ Approved: **{result['config_id']}**", _pipeline_md(gen=True, val=True, appr=True)
 
 
 def on_reject(config_state: dict, notes: str):
     if not config_state:
-        return "", "⚠️ No config loaded.", _pipeline_md()
+        return "{}", "⚠️ No config loaded.", _pipeline_md()
     result = reject(config_state, REVIEWER_ID, notes)
     return _to_json_str(result), f"🔴 Rejected. Reason: {notes or 'None provided'}", _pipeline_md(gen=True, val=True, appr=False)
 
 
 def on_deploy(config_state: dict, validation_state: dict, environment: str, notes: str):
     if not config_state:
-        return "", "⚠️ Generate and approve a config first."
+        return "{}", "⚠️ Generate and approve a config first.", _pipeline_md()
 
     strict = config_state.get("parameters", {}).get("strict_mode", False)
     errors = validation_state.get("errors", [])
@@ -255,11 +268,19 @@ def on_deploy(config_state: dict, validation_state: dict, environment: str, note
             "reason": "Strict Mode is ON — deployment blocked due to validation errors",
             "errors": errors,
         }
-        return _to_json_str(blocked), f"🚫 **Deployment blocked** — Strict Mode is enabled and {len(errors)} validation error(s) must be resolved first."
+        return (
+            _to_json_str(blocked),
+            f"🚫 **Deployment blocked** — Strict Mode is enabled and {len(errors)} validation error(s) must be resolved first.",
+            _pipeline_md(gen=True, val=True, appr=True),
+        )
 
     result = deploy(config_state, environment, notes)
     icon = "✅" if result["success"] else "❌"
-    return _to_json_str(result), f"{icon} Deployed **{result.get('config_id')}** → **{result.get('target_environment')}** | Ref: {result.get('audit_ref')}"
+    return (
+        _to_json_str(result),
+        f"{icon} Deployed **{result.get('config_id')}** → **{result.get('target_environment')}** | Ref: {result.get('audit_ref')}",
+        _pipeline_md(gen=True, val=True, appr=True, dep=result["success"]),
+    )
 
 
 def on_refresh_logs():
@@ -268,6 +289,40 @@ def on_refresh_logs():
 
 def on_load_history():
     return _to_json_str(get_config_history())
+
+
+# ---------------------------------------------------------------------------
+# Metrics — computed from audit log (read-only, no state mutation)
+# ---------------------------------------------------------------------------
+def compute_metrics() -> str:
+    logs = get_recent_logs(500)
+    generated = [l for l in logs if l.get("action") == "CONFIG_GENERATED"]
+    approved  = [l for l in logs if l.get("action") == "CONFIG_APPROVED"]
+    rejected  = [l for l in logs if l.get("action") == "CONFIG_REJECTED"]
+    deployed  = [l for l in logs if l.get("action") == "CONFIG_DEPLOYED"]
+
+    n_gen   = len(generated)
+    n_valid = sum(1 for l in generated if l.get("details", {}).get("validation_status") == "valid")
+    n_appr  = len(approved)
+    n_rej   = len(rejected)
+    n_dep   = len(deployed)
+
+    accuracy      = f"{n_valid / n_gen * 100:.0f}%"        if n_gen              else "—"
+    error_rate    = f"{(n_gen - n_valid) / n_gen * 100:.0f}%" if n_gen           else "—"
+    override_rate = f"{n_rej / (n_appr + n_rej) * 100:.0f}%" if (n_appr + n_rej) else "—"
+
+    dev_dep  = sum(1 for l in deployed if l.get("details", {}).get("environment") == "dev")
+    qa_dep   = sum(1 for l in deployed if l.get("details", {}).get("environment") == "qa")
+    prod_dep = sum(1 for l in deployed if l.get("details", {}).get("environment") == "prod")
+
+    return (
+        f"| Metric | Value | Detail |\n|---|---|---|\n"
+        f"| **Validation Accuracy** | {accuracy} | {n_valid} / {n_gen} configs passed validation |\n"
+        f"| **Error Detection Rate** | {error_rate} | {n_gen - n_valid} / {n_gen} configs had errors |\n"
+        f"| **Human Override Rate** | {override_rate} | {n_rej} rejected out of {n_appr + n_rej} reviewed |\n"
+        f"| **Total Deployments** | {n_dep} | Dev: {dev_dep} · QA: {qa_dep} · Prod: {prod_dep} |\n"
+        f"| **Configs Generated** | {n_gen} | Approved: {n_appr} · Rejected: {n_rej} |\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -286,139 +341,157 @@ with gr.Blocks(title="IQVIA Configuration Agent") as demo:
     config_state     = gr.State({})
     validation_state = gr.State({})
 
-    # ── Header ───────────────────────────────────────────────────────────────
+    # ── Header (full width) ───────────────────────────────────────────────────
     gr.Markdown("# 🏥 IQVIA Configuration Agent")
     gr.Markdown(
         "**End-to-End AI-Powered Configuration Lifecycle** · "
         "Requirement → Generation → Validation → Approval → Deployment → Audit"
     )
-
-    pipeline_md = gr.Markdown(PIPELINE_IDLE)
-
     gr.Markdown("---")
 
-    # ── STEP 1: Requirement Input ─────────────────────────────────────────────
-    gr.Markdown("### 📋 Step 1 — Business Requirement", elem_classes=["step-label"])
-
-    with gr.Tabs():
-        with gr.Tab("✏️ Natural Language"):
-            requirement_input = gr.Textbox(
-                label="Enter requirement in plain English",
-                placeholder=(
-                    "e.g. Age must be > 18, severity field is mandatory, "
-                    "high severity cases must be routed to senior reviewer..."
-                ),
-                lines=4,
-            )
-        with gr.Tab("📂 Preset Examples"):
-            gr.Markdown("Select a preset scenario — click **Load** to copy it into the input box.")
-            preset_radio = gr.Radio(
-                choices=list(PRESET_SCENARIOS.keys()),
-                label="Preset Configuration Scenarios",
-                value=None,
-            )
-            load_preset_btn = gr.Button("⬆️ Load into Requirement Box", size="sm")
-
-    with gr.Accordion("⚙️ Configuration Parameters", open=True):
-        with gr.Row():
-            domain_dd = gr.Dropdown(
-                choices=DOMAINS, value="clinical",
-                label="Domain", info="Target platform domain"
-            )
-            priority_radio = gr.Radio(
-                choices=PRIORITIES, value="medium",
-                label="Priority"
-            )
-            approver_dd = gr.Dropdown(
-                choices=APPROVER_ROLES, value="senior_reviewer",
-                label="Approver Role"
-            )
-        with gr.Row():
-            approval_yn     = gr.Radio(choices=["Yes", "No"], value="Yes", label="Approval Required?")
-            notification_cb = gr.Checkbox(value=True,  label="Enable Notifications")
-            strict_cb       = gr.Checkbox(value=False, label="Strict Mode (errors block deploy)")
-
+    # ── Two-column layout ─────────────────────────────────────────────────────
     with gr.Row():
-        model_dd = gr.Dropdown(
-            choices=LLM_MODELS,
-            value=LLM_MODELS[0],
-            label="🤖 LLM Model",
-            info="Select which Qwen model to use for config generation",
-            scale=2,
-        )
 
-    generate_btn   = gr.Button("⚙️ Generate Configuration", variant="primary", size="lg")
-    gen_status     = gr.Markdown("")
-    token_usage_md = gr.Markdown("", label="Token Usage")
+        # ── LEFT SIDEBAR: Pipeline status + LLM selection ────────────────────
+        with gr.Column(scale=1, min_width=220):
+            gr.Markdown("### 🗺️ Pipeline Status", elem_classes=["step-label"])
+            pipeline_md = gr.Markdown(PIPELINE_IDLE)
+            gr.Markdown("---")
+            gr.Markdown("### 🤖 LLM Model", elem_classes=["step-label"])
+            model_dd = gr.Dropdown(
+                choices=LLM_MODELS,
+                value=LLM_MODELS[0],
+                label="Model",
+                info="Qwen model for generation",
+            )
 
-    gr.Markdown("---")
+        # ── RIGHT MAIN CONTENT ────────────────────────────────────────────────
+        with gr.Column(scale=4):
 
-    # ── STEP 2+3: Config Output + Validation ────────────────────────────────
-    with gr.Row():
-        with gr.Column(scale=3):
-            gr.Markdown("### ⚙️ Step 2 — Generated Configuration", elem_classes=["step-label"])
+            # ── STEP 1: Requirement Input ─────────────────────────────────────
+            gr.Markdown("### 📋 Step 1 — Business Requirement", elem_classes=["step-label"])
             with gr.Tabs():
-                with gr.Tab("📄 JSON"):
-                    config_json = gr.Code(value="{}", label="Configuration (JSON)", language="json", lines=20)
-                with gr.Tab("📝 YAML"):
-                    config_yaml = gr.Code(value="# Ready — click Generate", label="Configuration (YAML)", language="yaml", lines=20)
-                with gr.Tab("📊 Rules Table"):
-                    rules_table = gr.Dataframe(
-                        headers=RULE_HEADERS,
-                        datatype=["str"] * 6,
-                        label="Validation Rules",
-                        interactive=False,
-                        wrap=True,
+                with gr.Tab("✏️ Natural Language"):
+                    requirement_input = gr.Textbox(
+                        label="Enter requirement in plain English",
+                        placeholder=(
+                            "e.g. Age must be > 18, severity field is mandatory, "
+                            "high severity cases must be routed to senior reviewer..."
+                        ),
+                        lines=4,
                     )
-                with gr.Tab("🔌 API Response Info"):
-                    api_info_json = gr.Code(value="{}", label="LLM API Metadata", language="json", lines=15)
+                with gr.Tab("📂 Preset Examples"):
+                    gr.Markdown("Select a preset scenario — click **Load** to copy it into the input box.")
+                    preset_radio = gr.Radio(
+                        choices=list(PRESET_SCENARIOS.keys()),
+                        label="Preset Configuration Scenarios",
+                        value=None,
+                    )
+                    load_preset_btn = gr.Button("⬆️ Load into Requirement Box", size="sm")
 
-        with gr.Column(scale=2):
-            gr.Markdown("### ✅ Step 3 — Validation Report", elem_classes=["step-label"])
-            validation_json = gr.Code(value="{}", label="Validation Results", language="json", lines=15)
+            with gr.Accordion("⚙️ Configuration Parameters", open=True):
+                with gr.Row():
+                    domain_dd = gr.Dropdown(
+                        choices=DOMAINS, value="clinical",
+                        label="Domain", info="Target platform domain"
+                    )
+                    priority_radio = gr.Radio(
+                        choices=PRIORITIES, value="medium",
+                        label="Priority"
+                    )
+                    approver_dd = gr.Dropdown(
+                        choices=APPROVER_ROLES, value="senior_reviewer",
+                        label="Approver Role"
+                    )
+                with gr.Row():
+                    approval_yn     = gr.Radio(choices=["Yes", "No"], value="Yes", label="Approval Required?")
+                    notification_cb = gr.Checkbox(value=True,  label="Enable Notifications")
+                    strict_cb       = gr.Checkbox(value=False, label="Strict Mode (errors block deploy)")
 
-    gr.Markdown("---")
+            generate_btn   = gr.Button("⚙️ Generate Configuration", variant="primary", size="lg")
+            gen_status     = gr.Markdown("")
+            token_usage_md = gr.Markdown("")
 
-    # ── STEP 4: Human Approval ────────────────────────────────────────────────
-    gr.Markdown("### 👤 Step 4 — Human-in-the-Loop Approval", elem_classes=["step-label"])
-    reviewer_notes  = gr.Textbox(label="Reviewer Notes", placeholder="Add override reason or comments here...", lines=2)
-    with gr.Row():
-        approve_btn = gr.Button("✅ Approve", variant="primary")
-        reject_btn  = gr.Button("❌ Reject",  variant="stop")
-    approval_json   = gr.Code(value="{}", label="Approval Record", language="json", lines=8)
-    approval_status = gr.Markdown("")
+            gr.Markdown("---")
 
-    gr.Markdown("---")
+            # ── STEP 2+3: Config Output + Validation ──────────────────────────
+            with gr.Row():
+                with gr.Column(scale=3):
+                    gr.Markdown("### ⚙️ Step 2 — Generated Configuration", elem_classes=["step-label"])
+                    with gr.Tabs():
+                        with gr.Tab("📄 JSON"):
+                            config_json = gr.Code(value="{}", label="Configuration (JSON)", language="json", lines=20)
+                        with gr.Tab("📝 YAML"):
+                            config_yaml = gr.Code(value="# Ready — click Generate", label="Configuration (YAML)", language="yaml", lines=20)
+                        with gr.Tab("📊 Rules Table"):
+                            rules_table = gr.Dataframe(
+                                headers=RULE_HEADERS,
+                                datatype=["str"] * 6,
+                                label="Validation Rules",
+                                interactive=False,
+                                wrap=True,
+                            )
+                        with gr.Tab("🔌 API Response Info"):
+                            api_info_json = gr.Code(value="{}", label="LLM API Metadata", language="json", lines=15)
 
-    # ── STEP 5: Deployment ────────────────────────────────────────────────────
-    gr.Markdown("### 🚀 Step 5 — Deployment Pipeline (Dev → QA → Prod)", elem_classes=["step-label"])
-    env_radio       = gr.Radio(choices=["dev", "qa", "prod"], value="dev", label="Target Environment")
-    deploy_btn      = gr.Button("🚀 Deploy", variant="primary")
-    deployment_json = gr.Code(value="{}", label="Deployment Status", language="json", lines=20)
-    deploy_status   = gr.Markdown("")
+                with gr.Column(scale=2):
+                    gr.Markdown("### ✅ Step 3 — Validation Report", elem_classes=["step-label"])
+                    validation_json = gr.Code(value="{}", label="Validation Results", language="json", lines=15)
 
-    gr.Markdown("---")
+            gr.Markdown("---")
 
-    # ── STEP 6: Audit Logs + Environment ────────────────────────────────────
-    with gr.Accordion("📊 Step 6 — Audit Logs & Environment", open=False):
-        with gr.Tabs():
-            with gr.Tab("📋 Audit Logs"):
-                logs_json   = gr.Code(value="[]", label="Recent Actions (newest first)", language="json", lines=20)
-                refresh_btn = gr.Button("🔄 Refresh Logs")
-            with gr.Tab("📁 Config History"):
-                history_json = gr.Code(value="[]", label="All Saved Configs", language="json", lines=20)
-                history_btn  = gr.Button("🔄 Load History")
-            with gr.Tab("🔧 Environment Variables"):
-                gr.Markdown("Active runtime environment variables (token is masked).")
-                env_table = gr.Dataframe(
-                    value=_env_vars_table(),
-                    headers=["Variable", "Value", "Description"],
-                    datatype=["str", "str", "str"],
-                    interactive=False,
+            # ── STEP 4: Human Approval ────────────────────────────────────────
+            gr.Markdown("### 👤 Step 4 — Human-in-the-Loop Approval", elem_classes=["step-label"])
+            reviewer_notes  = gr.Textbox(label="Reviewer Notes", placeholder="Add override reason or comments here...", lines=2)
+            with gr.Row():
+                approve_btn = gr.Button("✅ Approve", variant="primary")
+                reject_btn  = gr.Button("❌ Reject",  variant="stop")
+            approval_json   = gr.Code(value="{}", label="Approval Record", language="json", lines=8)
+            approval_status = gr.Markdown("")
+
+            gr.Markdown("---")
+
+            # ── STEP 5: Deployment ────────────────────────────────────────────
+            gr.Markdown("### 🚀 Step 5 — Deployment Pipeline (Dev → QA → Prod)", elem_classes=["step-label"])
+            env_radio       = gr.Radio(choices=["dev", "qa", "prod"], value="dev", label="Target Environment")
+            deploy_btn      = gr.Button("🚀 Deploy", variant="primary")
+            deployment_json = gr.Code(value="{}", label="Deployment Status", language="json", lines=20)
+            deploy_status   = gr.Markdown("")
+
+            gr.Markdown("---")
+
+            # ── STEP 6: Audit Logs + Environment ─────────────────────────────
+            with gr.Accordion("📊 Step 6 — Audit Logs & Environment", open=False):
+                with gr.Tabs():
+                    with gr.Tab("📋 Audit Logs"):
+                        logs_json   = gr.Code(value="[]", label="Recent Actions (newest first)", language="json", lines=20)
+                        refresh_btn = gr.Button("🔄 Refresh Logs")
+                    with gr.Tab("📁 Config History"):
+                        history_json = gr.Code(value="[]", label="All Saved Configs", language="json", lines=20)
+                        history_btn  = gr.Button("🔄 Load History")
+                    with gr.Tab("🔧 Environment Variables"):
+                        gr.Markdown("Active runtime environment variables (token is masked).")
+                        env_table = gr.Dataframe(
+                            value=_env_vars_table(),
+                            headers=["Variable", "Value", "Description"],
+                            datatype=["str", "str", "str"],
+                            interactive=False,
+                        )
+                        env_refresh_btn = gr.Button("🔄 Refresh")
+
+            # ── STEP 7: Performance Metrics ───────────────────────────────────
+            with gr.Accordion("📈 Step 7 — Performance Metrics", open=False):
+                gr.Markdown(
+                    "Computed from audit log · "
+                    "**Accuracy** = valid/total · "
+                    "**Error Detection** = invalid/total · "
+                    "**Override Rate** = rejected/reviewed · "
+                    "**Production Monitoring** = deployments by environment"
                 )
-                env_refresh_btn = gr.Button("🔄 Refresh")
+                metrics_md  = gr.Markdown(compute_metrics())
+                metrics_btn = gr.Button("🔄 Refresh Metrics")
 
-    # ── Wire-up ───────────────────────────────────────────────────────────────
+    # ── Wire-up (unchanged) ───────────────────────────────────────────────────
     load_preset_btn.click(
         fn=fill_preset,
         inputs=[preset_radio],
@@ -460,12 +533,13 @@ with gr.Blocks(title="IQVIA Configuration Agent") as demo:
     deploy_btn.click(
         fn=on_deploy,
         inputs=[config_state, validation_state, env_radio, reviewer_notes],
-        outputs=[deployment_json, deploy_status],
+        outputs=[deployment_json, deploy_status, pipeline_md],
     )
 
-    refresh_btn.click(fn=on_refresh_logs,  outputs=[logs_json])
-    history_btn.click(fn=on_load_history,  outputs=[history_json])
+    refresh_btn.click(fn=on_refresh_logs,   outputs=[logs_json])
+    history_btn.click(fn=on_load_history,   outputs=[history_json])
     env_refresh_btn.click(fn=_env_vars_table, outputs=[env_table])
+    metrics_btn.click(fn=compute_metrics,   outputs=[metrics_md])
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":

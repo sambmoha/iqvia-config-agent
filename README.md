@@ -9,13 +9,11 @@ app_file: app.py
 pinned: false
 ---
 
-# IQVIA Configuration Agent
+# 🏥 IQVIA Configuration Agent
 
 > **End-to-End AI-Powered Configuration Lifecycle for Clinical & Enterprise Platforms**
 
-A production-grade prototype that converts plain-English business requirements into
-validated, versioned, and audit-logged system configurations — demonstrating the full
-pipeline from requirement ingestion to simulated multi-environment deployment.
+An intelligent agent that converts plain-English business requirements into validated, versioned, and audit-logged system configurations — demonstrating the complete pipeline from requirement ingestion to simulated multi-environment deployment.
 
 Built for the IQVIA AI & Automation CoE case study.
 
@@ -23,46 +21,168 @@ Built for the IQVIA AI & Automation CoE case study.
 
 ## Live Demo
 
-Deployed on Hugging Face Spaces:
-`https://huggingface.co/spaces/<your-hf-username>/iqvia-config-agent`
+**Hugging Face Spaces:** `https://huggingface.co/spaces/Sambmoha/iqvia-config-agent`
 
 ---
 
-## Pipeline Overview
+## Architecture Overview
 
 ```
-Business Requirement
+┌─────────────────────────────────────────────────────────────────┐
+│                        Gradio UI (app.py)                       │
+│  ┌─────────────┐   ┌─────────────────────────────────────────┐  │
+│  │ LEFT SIDEBAR│   │          RIGHT MAIN CONTENT             │  │
+│  │             │   │  Step 1: Business Requirement Input     │  │
+│  │  Pipeline   │   │  Step 2: Generated Configuration        │  │
+│  │  Status     │   │  Step 3: Validation Report              │  │
+│  │             │   │  Step 4: Human-in-the-Loop Approval     │  │
+│  │  LLM Model  │   │  Step 5: Deployment Pipeline            │  │
+│  │  Selector   │   │  Step 6: Audit Logs & Environment       │  │
+│  │             │   │  Step 7: Performance Metrics            │  │
+│  └─────────────┘   └─────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                    ┌─────────▼──────────┐
+                    │   agent/flow.py    │
+                    │  Pipeline Orchestr │
+                    └─────────┬──────────┘
+                              │
+          ┌───────────────────┼───────────────────┐
+          │                   │                   │
+  ┌───────▼──────┐  ┌────────▼───────┐  ┌────────▼────────┐
+  │  tools/llm   │  │tools/validator │  │tools/deployer   │
+  │  Qwen3-8B    │  │ Schema+Rules   │  │ Dev→QA→Prod     │
+  │  via HF API  │  │ Validation     │  │ Simulation      │
+  └──────────────┘  └────────────────┘  └─────────────────┘
+          │
+  ┌───────▼──────────────────────────────────────────┐
+  │                tools/logger.py                    │
+  │   NDJSON Audit Log  ·  JSON Config Persistence   │
+  └──────────────────────────────────────────────────┘
+```
+
+### Data Flow Per Request
+
+```
+User Input (requirement text + parameters)
         │
         ▼
-┌──────────────────┐
-│  LLM Generation  │  ← Qwen/Qwen3-8B via HF Inference API
-│  (+ Fallback)    │  ← Rule-based parser if LLM unavailable
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│   Validation     │  ← Schema · Business rules · Access controls
-│   Engine         │  ← Scores 0-100, lists errors + warnings
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Human-in-the-   │  ← Reviewer approves or rejects
-│  Loop Approval   │  ← Notes captured in audit log
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Deployment      │  ← Simulated Dev → QA → Prod pipeline
-│  Simulator       │  ← Pre-deploy checks per environment
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Audit Logging   │  ← Every action logged with timestamp + actor
-│  + Versioning    │  ← All configs persisted to configs.json
-└──────────────────┘
+app.py → on_generate()
+        │
+        ▼
+agent/flow.py → generate_and_validate()
+        │
+        ├──► tools/llm.py → call_llm()
+        │         │  HF Inference API (Qwen3-8B)
+        │         │  If token missing or LLM fails:
+        │         └──► _fallback_config() [regex parser]
+        │
+        ├──► tools/validator.py → validate_config()
+        │         Schema check · Rule check · Workflow check · ACL check
+        │         Returns score 0–100 + errors + warnings
+        │
+        └──► tools/logger.py → log_action() + save_config()
+                  Appends to data/logs.json (NDJSON)
+                  Saves to data/configs.json (JSON array)
+                  │
+                  ▼
+        UI updates: JSON · YAML · Rules Table · API Info · Validation · Pipeline
 ```
+
+---
+
+## File Structure
+
+```
+iqvia-config-agent/
+│
+├── app.py                  # Gradio UI — all event handlers + layout
+│
+├── agent/
+│   └── flow.py             # Pipeline orchestrator
+│                           #   generate_and_validate() — Step 1+2
+│                           #   approve() / reject()    — Step 3
+│                           #   deploy()                — Step 4
+│
+├── tools/
+│   ├── llm.py              # HF InferenceClient wrapper
+│   │                       #   call_llm() → Qwen3-8B via HF Serverless API
+│   │                       #   _extract_json() → strips thinking tags, parses JSON
+│   ├── validator.py        # Config validation engine
+│   │                       #   _check_schema()          — required top-level fields
+│   │                       #   _check_validation_rules() — rule field checks
+│   │                       #   _check_workflow()         — approval logic
+│   │                       #   _check_access_controls()  — ACL structure
+│   ├── deployer.py         # Dev→QA→Prod deployment simulator
+│   │                       #   deploy_config() — runs pre-deploy checks per env
+│   └── logger.py           # Audit logger + config persistence
+│                           #   log_action()        — NDJSON append
+│                           #   save_config()       — JSON array persist
+│                           #   get_recent_logs()   — last N entries (reversed)
+│                           #   get_config_history()— all saved configs
+│
+├── data/
+│   ├── configs.json        # All generated configs (JSON array)
+│   └── logs.json           # Audit trail (newline-delimited JSON)
+│
+├── .env                    # Local secrets (NOT committed — in .gitignore)
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## Component Details
+
+### `app.py` — UI & Event Handlers
+
+| Function | Inputs | Outputs | Purpose |
+|---|---|---|---|
+| `on_generate()` | requirement, domain, priority, approval, approver, notification, strict_mode, model | 10 values (JSON, YAML, table, API meta, validation, status, tokens, pipeline, config_state, val_state) | Full generation pipeline |
+| `on_approve()` | config_state, notes | approval_json, status, pipeline_md | Log human approval |
+| `on_reject()` | config_state, notes | approval_json, status, pipeline_md | Log human rejection |
+| `on_deploy()` | config_state, val_state, environment, notes | deployment_json, status, pipeline_md | Strict mode gate + deployment |
+| `compute_metrics()` | — | Markdown table | Reads logs, computes live metrics |
+
+**Strict Mode gate (in `on_deploy`):**
+```python
+if strict_mode=True AND validation.errors is non-empty:
+    → block deployment, return blocked JSON
+else:
+    → proceed with deploy_config()
+```
+
+### `agent/flow.py` — Pipeline Orchestrator
+
+Calls tools in sequence. Contains `_fallback_config()` — a deterministic regex parser that extracts rules from plain English when the LLM is unavailable. The app **never crashes** — it always returns a usable config.
+
+### `tools/llm.py` — LLM Integration
+
+- Uses `huggingface_hub.InferenceClient` for serverless Qwen3-8B calls
+- System prompt instructs model to output **only valid JSON**
+- `_extract_json()` strips `<think>...</think>` blocks, tries direct parse, then regex extraction
+- Falls back gracefully on any exception
+
+### `tools/validator.py` — Validation Engine
+
+4 check categories, each contributes 25 points to the score:
+1. **Schema** — required top-level keys present
+2. **Rules** — each rule has `rule_id`, `field`, `operator`, `severity`, `message`; operators in allowed set
+3. **Workflow** — steps defined, `approver_role` present when `approval_required=true`
+4. **Access Controls** — `read`, `write`, `approve` lists non-empty
+
+### `tools/deployer.py` — Deployment Simulator
+
+Pre-deploy checks increase with environment strictness:
+- **dev** — 3 checks (schema, fields, syntax)
+- **qa** — 6 checks (+ business rules, cross-field, regression)
+- **prod** — 9 checks (+ CAB sign-off, rollback plan, audit trail)
+
+### `tools/logger.py` — Audit & Persistence
+
+- `log_action()` — appends one NDJSON line per action (CONFIG_GENERATED, CONFIG_APPROVED, CONFIG_REJECTED, CONFIG_DEPLOYED)
+- `save_config()` — persists config dict to JSON array
+- Auto-creates `data/` directory if missing (safe on HF Spaces)
 
 ---
 
@@ -72,9 +192,9 @@ Business Requirement
 |---|---|---|
 | **UI** | Gradio 6.x | Interactive web interface (Blocks API) |
 | **LLM** | Qwen/Qwen3-8B | Config generation from natural language |
-| **LLM API** | HuggingFace InferenceClient | Serverless API calls (no local GPU needed) |
+| **LLM API** | HuggingFace InferenceClient | Serverless API (no local GPU) |
 | **Fallback** | Rule-based regex parser | Graceful degradation when LLM unavailable |
-| **Validation** | Custom Python engine | Schema + business rule + access control checks |
+| **Validation** | Custom Python engine | Schema + business rule + ACL checks |
 | **Serialisation** | JSON + YAML (PyYAML) | Config display and export |
 | **Persistence** | JSON flat files | Config history + NDJSON audit logs |
 | **Deployment** | Hugging Face Spaces | Free CPU hosting, auto-deploy from Git |
@@ -82,67 +202,15 @@ Business Requirement
 
 ---
 
-## Architecture
-
-```
-iqvia-config-agent/
-│
-├── app.py                  # Gradio UI — all event handlers and layout
-│
-├── agent/
-│   └── flow.py             # Pipeline orchestrator
-│                           #   generate_and_validate()
-│                           #   approve() / reject()
-│                           #   deploy()
-│
-├── tools/
-│   ├── llm.py              # HF InferenceClient wrapper (Qwen3-8B)
-│   ├── validator.py        # Schema + business rule validation engine
-│   ├── deployer.py         # Dev→QA→Prod deployment simulator
-│   └── logger.py           # NDJSON audit logger + config persistence
-│
-├── data/
-│   ├── configs.json        # Persisted config history (JSON array)
-│   └── logs.json           # Audit trail (newline-delimited JSON)
-│
-├── requirements.txt
-└── README.md
-```
-
-### Data flow per request
-
-1. **app.py** receives user input (requirement text + parameters)
-2. Calls `agent/flow.py → generate_and_validate()`
-3. `flow.py` calls `tools/llm.py → call_llm()` → HF Inference API
-4. If LLM fails → `flow.py` falls back to `_fallback_config()` (regex parser)
-5. `tools/validator.py → validate_config()` scores the result (0–100)
-6. `tools/logger.py` appends to `data/logs.json` and saves to `data/configs.json`
-7. UI displays JSON view, YAML view, Rules Table, API metadata
-8. Human clicks Approve → `flow.py → approve()` → logged
-9. Human clicks Deploy → `tools/deployer.py → deploy_config()` → pipeline simulation
-
-### GenAI vs Deterministic split
-
-| Task | Approach | Reason |
-|---|---|---|
-| Config generation | GenAI (Qwen3) | Natural language → structured JSON requires LLM |
-| JSON extraction | Deterministic regex | Reliable, auditable, no hallucination risk |
-| Validation | Deterministic rules | Compliance requires reproducible, explainable checks |
-| Deployment checks | Deterministic simulation | Predictable, environment-specific rule lists |
-| Approval | Human-in-the-loop | Regulated environment requires human sign-off |
-| Audit logging | Deterministic | Complete, tamper-evident trail |
-
----
-
 ## How to Run Locally
 
 ### Prerequisites
 - Python 3.10+
-- A Hugging Face account and API token (free)
+- Hugging Face account and API token (free tier works)
 
-### 1. Clone the repo
+### 1. Clone
 ```bash
-git clone https://github.com/<your-username>/iqvia-config-agent.git
+git clone https://github.com/sambmoha/iqvia-config-agent.git
 cd iqvia-config-agent
 ```
 
@@ -151,118 +219,169 @@ cd iqvia-config-agent
 pip install -r requirements.txt
 ```
 
-### 3. Set your HF token
+### 3. Create `.env` file with your token
 ```bash
-export HF_TOKEN=hf_your_token_here
+cat > .env << EOF
+HF_TOKEN=hf_your_token_here
+MODEL_NAME=Qwen/Qwen3-8B
+APP_ENV=development
+LOG_LEVEL=INFO
+EOF
 ```
 
 ### 4. Run
 ```bash
 python app.py
 ```
-Open `http://localhost:7860` in your browser.
+Open `http://localhost:7860`
 
-> **Note:** The app runs fully without a token using the rule-based fallback.
-> Set `HF_TOKEN` to enable the Qwen3-8B LLM for richer config generation.
-
-### Optional environment variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `HF_TOKEN` | — | Hugging Face API token |
-| `MODEL_NAME` | `Qwen/Qwen3-8B` | Override LLM model (any HF text model) |
-| `APP_ENV` | `development` | Environment label shown in UI |
-| `LOG_LEVEL` | `INFO` | Log verbosity |
+> **Note:** The app runs fully without a token using the rule-based fallback (tokens will show `None`). Set `HF_TOKEN` to enable the Qwen3-8B LLM for richer, multi-rule configs and real token counts.
 
 ---
 
-## Deploy to Hugging Face Spaces
+## How to Use the App
 
-### Step 1 — Create a Space
-1. Go to [huggingface.co/spaces](https://huggingface.co/spaces)
-2. Click **Create new Space**
-3. Set: **SDK → Gradio** | **Hardware → CPU Basic (free)**
-4. Name it `iqvia-config-agent`
+### Step-by-step workflow
 
-### Step 2 — Push your code
+```
+1. Enter requirement (or choose a preset)  →  Click ⚙️ Generate Configuration
+2. Review outputs: JSON · YAML · Rules Table · API Info · Validation Report
+3. Add reviewer notes  →  Click ✅ Approve  (or ❌ Reject)
+4. Select environment (dev / qa / prod)  →  Click 🚀 Deploy
+5. Check pipeline: all 6 steps should be 🟢
+6. Open Step 6 accordion  →  Refresh Logs to see audit trail
+7. Open Step 7 accordion  →  Refresh Metrics for live KPIs
+```
+
+---
+
+## Sample Complex Business Requirement
+
+Paste this into the **Natural Language** input box:
+
+```
+A clinical trial subject record must pass all of the following before database lock:
+
+1. Patient age must be between 18 and 75 years. Date of birth is mandatory.
+2. BMI must be between 16.0 and 45.0 kg/m². Both weight (40–200 kg) and height
+   (120–220 cm) are required fields.
+3. Haemoglobin must be between 8.0 and 18.0 g/dL. Creatinine must be below
+   2.0 mg/dL. Glucose must be between 70 and 300 mg/dL.
+4. All Serious Adverse Events (SAE) must have: event date, description, severity
+   classification (mild/moderate/severe), and outcome. Severity of 'severe'
+   triggers immediate escalation to medical monitor.
+5. Informed consent date must precede the first study procedure date. ICF version
+   must match the currently approved protocol version — mismatch is a critical error.
+6. Visit dates cannot be future dates. Each follow-up visit must occur after the
+   baseline visit. Missing visit dates are errors that block record lock.
+7. At least one valid lab result must exist per visit. Outlier values (> 3 standard
+   deviations from site mean) require medical monitor sign-off before approval.
+8. Principal Investigator e-signature is mandatory. Data manager e-signature is
+   mandatory. Both must be captured before the record can be submitted for lock.
+
+Domain: Clinical. Priority: High. Approval required from: Medical Monitor.
+```
+
+**Recommended settings:**
+- Domain → `clinical`
+- Priority → `high`
+- Approver Role → `medical_monitor`
+- Approval Required → `Yes`
+- Model → `Qwen/Qwen3-8B`
+
+**Expected output (with HF_TOKEN set):**
+- 6–8 validation rules covering age, BMI, lab values, SAE fields, consent dates, visit dates, signatures
+- Validation score: 100/100
+- Workflow: 2-step with medical_monitor approval
+- Prompt tokens: ~500–650 · Completion tokens: ~350–500
+
+---
+
+## Strict Mode — Example
+
+**What it does:** When enabled, the Deploy button is blocked if the generated config has any validation errors. This enforces zero-tolerance before production deployment.
+
+### Scenario to test it:
+
+**Step 1 — Enable Strict Mode**
+- Check ☑️ **Strict Mode (errors block deploy)** in Configuration Parameters
+
+**Step 2 — Generate a config**
+- Enter any requirement and click Generate
+- The fallback parser always produces a valid config (score 100, 0 errors)
+- **Result:** Deployment proceeds normally — Strict Mode passes because there are 0 errors ✅
+
+**Step 3 — Simulate Strict Mode blocking (run in terminal)**
 ```bash
-git remote add space https://huggingface.co/spaces/<your-username>/iqvia-config-agent
-git push space main
+cd iqvia-config-agent
+python -c "
+from app import on_deploy
+import json
+
+# Config with strict_mode=True
+cfg = {
+    'config_id': 'CFG_TEST_001',
+    'parameters': {'strict_mode': True}
+}
+
+# Validation result with 2 errors (simulates LLM returning incomplete config)
+val = {
+    'errors': ['Age field missing', 'Severity field missing'],
+    'warnings': []
+}
+
+result_json, status_msg, pipeline = on_deploy(cfg, val, 'prod', '')
+print(status_msg)
+print(json.loads(result_json))
+"
 ```
 
-Or upload files manually via the Space's **Files** tab.
-
-**Files to upload:**
+**Expected output:**
 ```
-app.py
-requirements.txt
-agent/__init__.py
-agent/flow.py
-tools/__init__.py
-tools/llm.py
-tools/validator.py
-tools/deployer.py
-tools/logger.py
-data/configs.json       ← upload as empty array: []
-data/logs.json          ← upload as empty file
+🚫 Deployment blocked — Strict Mode is enabled and 2 validation error(s) must be resolved first.
+{'blocked': True, 'reason': 'Strict Mode is ON — deployment blocked due to validation errors',
+ 'errors': ['Age field missing', 'Severity field missing']}
 ```
 
-### Step 3 — Add secret token
-```
-Space → Settings → Repository secrets
-  Name:  HF_TOKEN
-  Value: hf_your_token_here
-```
-
-Hugging Face restarts the Space and reads the token via `os.environ.get("HF_TOKEN")`.
-Your token is **never visible** in logs or the UI (it is masked in the env vars table).
-
-### Step 4 — Verify
-The Space auto-installs `requirements.txt` and runs `app.py`. Expect cold-start ~60s.
+**When does Strict Mode block in real usage?**
+- Strict Mode is ON **+** LLM generates a config missing required fields (e.g. `approver_role` absent, empty `validation_rules`) → deployment blocked
+- Strict Mode is OFF → deploy proceeds regardless of validation errors (with warnings logged)
 
 ---
 
-## UI Features
+## Performance Metrics (Step 7)
 
-| Feature | Description |
+| Metric | Definition |
 |---|---|
-| Natural language input | Free-text requirement entry |
-| 10 preset scenarios | Radio buttons covering clinical, safety, compliance, regulatory domains |
-| Config parameters | Domain dropdown · Priority radio · Approval Yes/No · Approver role dropdown · Notification checkbox · Strict mode checkbox |
-| JSON view | Full config as interactive JSON tree |
-| YAML view | Config as YAML (copy-paste ready) |
-| Rules table | Validation rules as a sortable dataframe |
-| API info tab | LLM model, status, tokens used, timestamp |
-| Validation report | Score 0-100 · Errors · Warnings · Checks passed |
-| Human approval | Approve / Reject with notes — both logged |
-| Deployment simulator | Dev → QA → Prod with per-environment pre-checks |
-| Audit log viewer | Last 25 actions, newest first |
-| Config history | All generated configs with timestamps |
-| Environment table | Runtime env vars (token masked) |
-| Pipeline progress bar | Live step-by-step status indicator |
+| **Validation Accuracy** | % of generated configs that pass validation (0 errors) |
+| **Error Detection Rate** | % of configs that had at least one validation error |
+| **Human Override Rate** | % of reviewed configs that were rejected by the human reviewer |
+| **Total Deployments** | Count broken down by Dev / QA / Prod |
+| **Configs Generated** | Total generated with approved vs rejected split |
+
+Click **🔄 Refresh Metrics** to recompute from the live audit log.
 
 ---
 
 ## Governance & Compliance Notes
 
-- **Audit trail:** Every action (generate, approve, reject, deploy) written to `data/logs.json` with timestamp, actor, and config ID.
+- **Audit trail:** Every action (generate, approve, reject, deploy) written to `data/logs.json` with UTC timestamp, actor, config ID, and details.
 - **Versioning:** All configs saved to `data/configs.json` with `_saved_at` timestamp.
-- **Explainability:** Validation errors and warnings are human-readable; fallback mode labels its source (`_source: fallback_parser`).
-- **Human gate:** Deployment is only possible after the Approve button is clicked — the UI enforces human-in-the-loop.
-- **No hallucination pass-through:** JSON extraction is deterministic; invalid LLM output falls back to the rule-based parser automatically.
+- **Human gate:** Approval is logged before deployment — enforces human-in-the-loop.
+- **Explainability:** Validation errors are human-readable; fallback labels its source (`_source: fallback_parser`).
+- **Strict Mode:** Prevents deployment of invalid configs in regulated environments.
+- **Token masking:** HF_TOKEN is never exposed in UI (masked with ●●●●●●●●xxxx).
 
 ---
 
-## Evaluation Metrics (demo values)
+## Environment Variables
 
-| Metric | Value |
-|---|---|
-| Validation score | 0–100 per config |
-| Error detection rate | Rules checked: schema (4 categories) |
-| Human override rate | Tracked via approve/reject log ratio |
-| Fallback rate | `_source: fallback_parser` in config |
-| Time saved | Manual config: ~45 min → Agent: ~30 sec |
-| Deployment check coverage | Dev: 3 · QA: 6 · Prod: 9 checks |
+| Variable | Default | Description |
+|---|---|---|
+| `HF_TOKEN` | — | Hugging Face API token (enables LLM mode) |
+| `MODEL_NAME` | `Qwen/Qwen3-8B` | Override LLM model |
+| `APP_ENV` | `development` | Environment label shown in UI |
+| `LOG_LEVEL` | `INFO` | Log verbosity |
 
 ---
 

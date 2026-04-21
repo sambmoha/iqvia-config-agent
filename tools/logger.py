@@ -19,12 +19,14 @@ def log_action(action_type: str, actor: str, config_id: str, details: dict) -> N
         "details": details,
     }
     logs_path = os.path.abspath(LOGS_PATH)
+    os.makedirs(os.path.dirname(logs_path), exist_ok=True)
     with open(logs_path, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
 
 def save_config(config: dict) -> None:
     configs_path = os.path.abspath(CONFIGS_PATH)
+    os.makedirs(os.path.dirname(configs_path), exist_ok=True)
     try:
         with open(configs_path, "r") as f:
             configs = json.load(f)
