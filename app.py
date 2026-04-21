@@ -280,7 +280,7 @@ footer { display: none !important; }
 
 RULE_HEADERS = ["Rule ID", "Field", "Operator", "Value", "Severity", "Message"]
 
-with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_hue="blue"), css=CSS) as demo:
+with gr.Blocks(title="IQVIA Configuration Agent") as demo:
 
     # ── Shared state ─────────────────────────────────────────────────────────
     config_state     = gr.State({})
@@ -401,21 +401,22 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
 
     # ── STEP 6: Audit Logs + Environment ────────────────────────────────────
     with gr.Accordion("📊 Step 6 — Audit Logs & Environment", open=False):
-        with gr.Tab("📋 Audit Logs"):
-            logs_json   = gr.Code(value="", label="Recent Actions (newest first)", language="json", lines=20)
-            refresh_btn = gr.Button("🔄 Refresh Logs")
-        with gr.Tab("📁 Config History"):
-            history_json = gr.Code(value="", label="All Saved Configs", language="json", lines=20)
-            history_btn  = gr.Button("🔄 Load History")
-        with gr.Tab("🔧 Environment Variables"):
-            gr.Markdown("Active runtime environment variables (token is masked).")
-            env_table = gr.Dataframe(
-                value=_env_vars_table(),
-                headers=["Variable", "Value", "Description"],
-                datatype=["str", "str", "str"],
-                interactive=False,
-            )
-            env_refresh_btn = gr.Button("🔄 Refresh")
+        with gr.Tabs():
+            with gr.Tab("📋 Audit Logs"):
+                logs_json   = gr.Code(value="", label="Recent Actions (newest first)", language="json", lines=20)
+                refresh_btn = gr.Button("🔄 Refresh Logs")
+            with gr.Tab("📁 Config History"):
+                history_json = gr.Code(value="", label="All Saved Configs", language="json", lines=20)
+                history_btn  = gr.Button("🔄 Load History")
+            with gr.Tab("🔧 Environment Variables"):
+                gr.Markdown("Active runtime environment variables (token is masked).")
+                env_table = gr.Dataframe(
+                    value=_env_vars_table(),
+                    headers=["Variable", "Value", "Description"],
+                    datatype=["str", "str", "str"],
+                    interactive=False,
+                )
+                env_refresh_btn = gr.Button("🔄 Refresh")
 
     # ── Wire-up ───────────────────────────────────────────────────────────────
     load_preset_btn.click(
@@ -468,4 +469,4 @@ with gr.Blocks(title="IQVIA Configuration Agent", theme=gr.themes.Soft(primary_h
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(theme=gr.themes.Soft(primary_hue="blue"), css=CSS)
